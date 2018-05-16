@@ -3,48 +3,31 @@
 */
 
 import { A } from '@ember/array';
-
 import { set, get } from '@ember/object';
 import { run as emberRun } from '@ember/runloop';
-import {
-  RecordArray,
-  FilteredRecordArray,
-  AdapterPopulatedRecordArray
-} from "./record-arrays";
-
-import cloneNull from "./clone-null";
 import { assert } from '@ember/debug';
+import cloneNull from './clone-null';
+import { RecordArray, AdapterPopulatedRecordArray } from './record-arrays';
 
 const {
   _flush,
-  array_flatten,
   array_remove,
   create,
   createAdapterPopulatedRecordArray,
-  createFilteredRecordArray,
   createRecordArray,
   liveRecordArrayFor,
-  filteredRecordArraysFor,
   recordDidChange,
-  registerFilteredRecordArray,
   unregisterRecordArray,
-  updateFilter,
-  updateFilterRecordArray
-} = heimdall.registerMonitor('recordArrayManager',
+} = heimdall.registerMonitor(
+  'recordArrayManager',
   '_flush',
-  'array_fatten',
   'array_remove',
   'create',
   'createAdapterPopulatedRecordArray',
-  'createFilteredRecordArray',
   'createRecordArray',
   'liveRecordArrayFor',
-  'filteredRecordArraysFor',
   'recordDidChange',
-  'registerFilteredRecordArray',
-  'unregisterRecordArray',
-  'updateFilter',
-  'updateFilterRecordArray'
+  'unregisterRecordArray'
 );
 
 /**
@@ -58,7 +41,6 @@ export default class RecordArrayManager {
     this.store = options.store;
     this.isDestroying = false;
     this.isDestroyed = false;
-    this._filteredRecordArrays = Object.create(null);
     this._liveRecordArrays = Object.create(null);
     this._pending = Object.create(null);
     this._adapterPopulatedRecordArrays = [];
@@ -88,7 +70,7 @@ export default class RecordArrayManager {
     internalModel._pendingRecordArrayManagerFlush = true;
 
     let pending = this._pending;
-    let models = pending[modelName] = pending[modelName] || [];
+    let models = (pending[modelName] = pending[modelName] || []);
     if (models.push(internalModel) !== 1) {
       return;
     }
@@ -107,14 +89,6 @@ export default class RecordArrayManager {
       // build up a set of models to ensure we have purged correctly;
       if (internalModel.isHiddenFromRecordArrays()) {
         modelsToRemove.push(internalModel);
-      }
-    }
-
-    // process filteredRecordArrays
-    if (this._filteredRecordArrays[modelName]) {
-      let recordArrays = this.filteredRecordArraysFor(modelName);
-      for (let i = 0; i < recordArrays.length; i++) {
-        this.updateFilterRecordArray(recordArrays[i], modelName, internalModels);
       }
     }
 
@@ -146,43 +120,11 @@ export default class RecordArrayManager {
     return updateLiveRecordArray(array, internalModels);
   }
 
-  /**
-    Update an individual filter.
-
-    @private
-    @method updateFilterRecordArray
-    @param {DS.FilteredRecordArray} array
-    @param {String} modelName
-    @param {Array} internalModels
-  */
-  updateFilterRecordArray(array, modelName, internalModels) {
-    heimdall.increment(updateFilterRecordArray);
-
-    let filter = get(array, 'filterFunction');
-
-    let shouldBeInAdded = [];
-    let shouldBeRemoved = [];
-
-    for (let i = 0; i < internalModels.length; i++) {
-      let internalModel = internalModels[i];
-      if (internalModel.isHiddenFromRecordArrays() === false &&
-          filter(internalModel.getRecord())) {
-        if (internalModel._recordArrays.has(array)) { continue; }
-        shouldBeInAdded.push(internalModel);
-        internalModel._recordArrays.add(array);
-      } else {
-        if (internalModel._recordArrays.delete(array)) {
-          shouldBeRemoved.push(internalModel);
-        }
-      }
-    }
-
-    if (shouldBeInAdded.length > 0) { array._pushInternalModels(shouldBeInAdded);   }
-    if (shouldBeRemoved.length > 0) { array._removeInternalModels(shouldBeRemoved); }
-  }
-
   _syncLiveRecordArray(array, modelName) {
-    assert(`recordArrayManger.syncLiveRecordArray expects modelName not modelClass as the second param`, typeof modelName === 'string');
+    assert(
+      `recordArrayManger.syncLiveRecordArray expects modelName not modelClass as the second param`,
+      typeof modelName === 'string'
+    );
     let pending = this._pending[modelName];
     let hasPendingChanges = Array.isArray(pending);
     let hasNoPotentialDeletions = !hasPendingChanges || pending.length === 0;
@@ -220,27 +162,6 @@ export default class RecordArrayManager {
     }
   }
 
-  /**
-    This method is invoked if the `filterFunction` property is
-    changed on a `DS.FilteredRecordArray`.
-
-    It essentially re-runs the filter from scratch. This same
-    method is invoked when the filter is created in th first place.
-
-    @method updateFilter
-    @param {Array} array
-    @param {String} modelName
-    @param {Function} filter
-  */
-  updateFilter(array, modelName, filter) {
-    assert(`recordArrayManger.updateFilter expects modelName not modelClass as the second param, received ${modelName}`, typeof modelName === 'string');
-    heimdall.increment(updateFilter);
-    let modelMap = this.store._internalModelsFor(modelName);
-    let internalModels = modelMap.models;
-
-    this.updateFilterRecordArray(array, filter, internalModels);
-  }
-
   _didUpdateAll(modelName) {
     let recordArray = this._liveRecordArrays[modelName];
     if (recordArray) {
@@ -257,7 +178,10 @@ export default class RecordArrayManager {
     @return {DS.RecordArray}
   */
   liveRecordArrayFor(modelName) {
-    assert(`recordArrayManger.liveRecordArrayFor expects modelName not modelClass as the param`, typeof modelName === 'string');
+    assert(
+      `recordArrayManger.liveRecordArrayFor expects modelName not modelClass as the param`,
+      typeof modelName === 'string'
+    );
 
     heimdall.increment(liveRecordArrayFor);
 
@@ -288,21 +212,7 @@ export default class RecordArrayManager {
     }
     return visible;
   }
-  /**
-    Get the `DS.RecordArray` for a modelName, which contains all loaded records of
-    given modelName.
 
-    @method filteredRecordArraysFor
-    @param {String} modelName
-    @return {DS.RecordArray}
-  */
-  filteredRecordArraysFor(modelName) {
-    assert(`recordArrayManger.filteredRecordArraysFor expects modelName not modelClass as the param`, typeof modelName === 'string');
-
-    heimdall.increment(filteredRecordArraysFor);
-
-    return this._filteredRecordArrays[modelName] || (this._filteredRecordArrays[modelName] = []);
-  }
   /**
     Create a `DS.RecordArray` for a modelName.
 
@@ -312,7 +222,10 @@ export default class RecordArrayManager {
     @return {DS.RecordArray}
   */
   createRecordArray(modelName, content) {
-    assert(`recordArrayManger.createRecordArray expects modelName not modelClass as the param`, typeof modelName === 'string');
+    assert(
+      `recordArrayManger.createRecordArray expects modelName not modelClass as the param`,
+      typeof modelName === 'string'
+    );
     heimdall.increment(createRecordArray);
 
     let array = RecordArray.create({
@@ -320,39 +233,12 @@ export default class RecordArrayManager {
       content: A(content || []),
       store: this.store,
       isLoaded: true,
-      manager: this
+      manager: this,
     });
 
     if (Array.isArray(content)) {
       associateWithRecordArray(content, array);
     }
-
-    return array;
-  }
-
-  /**
-    Create a `DS.FilteredRecordArray` for a modelName and register it for updates.
-
-    @method createFilteredRecordArray
-    @param {String} modelName
-    @param {Function} filter
-    @param {Object} query (optional
-    @return {DS.FilteredRecordArray}
-  */
-  createFilteredRecordArray(modelName, filter, query) {
-    assert(`recordArrayManger.createFilteredRecordArray expects modelName not modelClass as the first param, received ${modelName}`, typeof modelName === 'string');
-
-    heimdall.increment(createFilteredRecordArray);
-    let array = FilteredRecordArray.create({
-      query,
-      modelName,
-      content: A(),
-      store: this.store,
-      manager: this,
-      filterFunction: filter
-    });
-
-    this.registerFilteredRecordArray(array, modelName, filter);
 
     return array;
   }
@@ -367,7 +253,10 @@ export default class RecordArrayManager {
   */
   createAdapterPopulatedRecordArray(modelName, query, internalModels, payload) {
     heimdall.increment(createAdapterPopulatedRecordArray);
-    assert(`recordArrayManger.createAdapterPopulatedRecordArray expects modelName not modelClass as the first param, received ${modelName}`, typeof modelName === 'string');
+    assert(
+      `recordArrayManger.createAdapterPopulatedRecordArray expects modelName not modelClass as the first param, received ${modelName}`,
+      typeof modelName === 'string'
+    );
 
     let array;
     if (Array.isArray(internalModels)) {
@@ -380,7 +269,7 @@ export default class RecordArrayManager {
         isLoaded: true,
         isUpdating: false,
         meta: cloneNull(payload.meta),
-        links: cloneNull(payload.links)
+        links: cloneNull(payload.links),
       });
 
       associateWithRecordArray(internalModels, array);
@@ -390,32 +279,13 @@ export default class RecordArrayManager {
         query: query,
         content: A(),
         store: this.store,
-        manager: this
+        manager: this,
       });
     }
 
     this._adapterPopulatedRecordArrays.push(array);
 
     return array;
-  }
-
-  /**
-    Register a RecordArray for a given modelName to be backed by
-    a filter function. This will cause the array to update
-    automatically when records of that modelName change attribute
-    values or states.
-
-    @method registerFilteredRecordArray
-    @param {DS.RecordArray} array
-    @param {String} modelName
-    @param {Function} filter
-  */
-  registerFilteredRecordArray(array, modelName, filter) {
-    heimdall.increment(registerFilteredRecordArray);
-    assert(`recordArrayManger.registerFilteredRecordArray expects modelName not modelClass as the second param, received ${modelName}`, typeof modelName === 'string');
-
-    this.filteredRecordArraysFor(modelName).push(array);
-    this.updateFilter(array, modelName, filter);
   }
 
   /**
@@ -430,15 +300,10 @@ export default class RecordArrayManager {
 
     let modelName = array.modelName;
 
-    // unregister filtered record array
-    let recordArrays = this.filteredRecordArraysFor(modelName);
-    let removedFromFiltered = remove(recordArrays, array);
-
     // remove from adapter populated record array
     let removedFromAdapterPopulated = remove(this._adapterPopulatedRecordArrays, array);
 
-    if (!removedFromFiltered && !removedFromAdapterPopulated) {
-
+    if (!removedFromAdapterPopulated) {
       let liveRecordArrayForType = this._liveRecordArrays[modelName];
       // unregister live record array
       if (liveRecordArrayForType) {
@@ -449,9 +314,14 @@ export default class RecordArrayManager {
     }
   }
 
+  _associateWithRecordArray(internalModels, array) {
+    associateWithRecordArray(internalModels, array);
+  }
+
   willDestroy() {
-    Object.keys(this._filteredRecordArrays).forEach(modelName => flatten(this._filteredRecordArrays[modelName]).forEach(destroy));
-    Object.keys(this._liveRecordArrays).forEach(modelName => this._liveRecordArrays[modelName].destroy());
+    Object.keys(this._liveRecordArrays).forEach(modelName =>
+      this._liveRecordArrays[modelName].destroy()
+    );
     this._adapterPopulatedRecordArrays.forEach(destroy);
     this.isDestroyed = true;
   }
@@ -464,18 +334,6 @@ export default class RecordArrayManager {
 
 function destroy(entry) {
   entry.destroy();
-}
-
-function flatten(list) {
-  heimdall.increment(array_flatten);
-  let length = list.length;
-  let result = [];
-
-  for (let i = 0; i < length; i++) {
-    result = result.concat(list[i]);
-  }
-
-  return result;
 }
 
 function remove(array, item) {
@@ -508,12 +366,20 @@ function updateLiveRecordArray(array, internalModels) {
 
     if (isDeleted) {
       modelsToRemove.push(internalModel);
-      recordArrays.delete(array)
+      recordArrays.delete(array);
     }
   }
 
-  if (modelsToAdd.length > 0)    { array._pushInternalModels(modelsToAdd); }
-  if (modelsToRemove.length > 0) { array._removeInternalModels(modelsToRemove); }
+  if (modelsToAdd.length > 0) {
+    array._pushInternalModels(modelsToAdd);
+  }
+  if (modelsToRemove.length > 0) {
+    array._removeInternalModels(modelsToRemove);
+  }
+
+  // return whether we performed an update.
+  // Necessary until 3.5 allows us to finish off ember-data-filter support.
+  return (modelsToAdd.length || modelsToRemove.length) > 0;
 }
 
 function removeFromAdapterPopulatedRecordArrays(internalModels) {

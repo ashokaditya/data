@@ -6,7 +6,7 @@ import setupStore from 'dummy/tests/helpers/store';
 import testInDebug from 'dummy/tests/helpers/test-in-debug';
 import {
   setup as setupModelFactoryInjections,
-  reset as resetModelFactoryInjection
+  reset as resetModelFactoryInjection,
 } from 'dummy/tests/helpers/model-factory-injection';
 import { module, test } from 'qunit';
 
@@ -17,43 +17,43 @@ const { hash } = RSVP;
 
 let env, store, User, Message, Post, Comment, Book, Chapter, Author, NewMessage;
 
-module("integration/relationship/belongs_to Belongs-To Relationships", {
+module('integration/relationship/belongs_to Belongs-To Relationships', {
   beforeEach() {
     User = DS.Model.extend({
       name: attr('string'),
       messages: hasMany('message', { polymorphic: true, async: false }),
-      favouriteMessage: belongsTo('message', { polymorphic: true, inverse: null, async: false })
+      favouriteMessage: belongsTo('message', { polymorphic: true, inverse: null, async: false }),
     });
 
     Message = DS.Model.extend({
       user: belongsTo('user', { inverse: 'messages', async: false }),
-      created_at: attr('date')
+      created_at: attr('date'),
     });
 
     Post = Message.extend({
       title: attr('string'),
-      comments: hasMany('comment', { async: false, inverse: null })
+      comments: hasMany('comment', { async: false, inverse: null }),
     });
 
     Comment = Message.extend({
       body: DS.attr('string'),
-      message: DS.belongsTo('message', { polymorphic: true, async: false, inverse: null })
+      message: DS.belongsTo('message', { polymorphic: true, async: false, inverse: null }),
     });
 
     Book = DS.Model.extend({
       name: attr('string'),
       author: belongsTo('author', { async: false }),
-      chapters: hasMany('chapters', { async: false })
+      chapters: hasMany('chapters', { async: false, inverse: 'book' }),
     });
 
     Chapter = DS.Model.extend({
       title: attr('string'),
-      book: belongsTo('book', { async: false })
+      book: belongsTo('book', { async: false, inverse: 'chapters' }),
     });
 
     Author = DS.Model.extend({
       name: attr('string'),
-      books: hasMany('books', { async: false })
+      books: hasMany('books', { async: false }),
     });
 
     env = setupStore({
@@ -63,43 +63,139 @@ module("integration/relationship/belongs_to Belongs-To Relationships", {
       message: Message,
       book: Book,
       chapter: Chapter,
-      author: Author
+      author: Author,
     });
 
     env.registry.optionsForType('serializer', { singleton: false });
     env.registry.optionsForType('adapter', { singleton: false });
 
-    env.registry.register('serializer:user', DS.JSONAPISerializer.extend({
-      attrs: {
-        favouriteMessage: { embedded: 'always' }
-      }
-    }));
+    env.registry.register(
+      'serializer:user',
+      DS.JSONAPISerializer.extend({
+        attrs: {
+          favouriteMessage: { embedded: 'always' },
+        },
+      })
+    );
 
     store = env.store;
 
-    User    = store.modelFor('user');
-    Post    = store.modelFor('post');
+    User = store.modelFor('user');
+    Post = store.modelFor('post');
     Comment = store.modelFor('comment');
     Message = store.modelFor('message');
-    Book    = store.modelFor('book');
+    Book = store.modelFor('book');
     Chapter = store.modelFor('chapter');
-    Author  = store.modelFor('author');
+    Author = store.modelFor('author');
   },
 
   afterEach() {
     resetModelFactoryInjection();
     run(env.container, 'destroy');
-  }
+  },
 });
 
-test("The store can materialize a non loaded monomorphic belongsTo association", function(assert) {
+test('returning a null relationship from payload sets the relationship to null on both sides', function(assert) {
+  env.registry.register(
+    'model:app',
+    DS.Model.extend({
+      name: attr('string'),
+      team: belongsTo('team', { async: true }),
+    })
+  );
+  env.registry.register(
+    'model:team',
+    DS.Model.extend({
+      apps: hasMany('app', { async: true }),
+    })
+  );
+  run(() => {
+    env.store.push({
+      data: {
+        id: '1',
+        type: 'app',
+        relationships: {
+          team: {
+            data: {
+              id: '1',
+              type: 'team',
+            },
+          },
+        },
+      },
+      included: [
+        {
+          id: '1',
+          type: 'team',
+          relationships: {
+            apps: {
+              data: [
+                {
+                  id: '1',
+                  type: 'app',
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  const app = env.store.peekRecord('app', '1');
+  const team = env.store.peekRecord('team', '1');
+  assert.equal(app.get('team.id'), team.get('id'), 'sets team correctly on app');
+  assert.deepEqual(
+    team
+      .get('apps')
+      .toArray()
+      .mapBy('id'),
+    ['1'],
+    'sets apps correctly on team'
+  );
+
+  env.adapter.shouldBackgroundReloadRecord = () => false;
+  env.adapter.updateRecord = (store, type, snapshot) => {
+    return RSVP.resolve({
+      data: {
+        id: '1',
+        type: 'app',
+        attributes: {
+          name: 'Hello',
+        },
+        relationships: {
+          team: {
+            data: null,
+          },
+        },
+      },
+    });
+  };
+
+  return run(() => {
+    app.set('name', 'Hello');
+    return app.save().then(() => {
+      assert.equal(app.get('team.id'), null, 'team removed from app relationship');
+      assert.deepEqual(
+        team
+          .get('apps')
+          .toArray()
+          .mapBy('id'),
+        [],
+        'app removed from team apps relationship'
+      );
+    });
+  });
+});
+
+test('The store can materialize a non loaded monomorphic belongsTo association', function(assert) {
   assert.expect(1);
 
   env.store.modelFor('post').reopen({
     user: DS.belongsTo('user', {
       async: true,
-      inverse: 'messages'
-    })
+      inverse: 'messages',
+    }),
   });
   env.adapter.shouldBackgroundReloadRecord = () => false;
   env.adapter.findRecord = function(store, type, id, snapshot) {
@@ -107,8 +203,8 @@ test("The store can materialize a non loaded monomorphic belongsTo association",
     return resolve({
       data: {
         id,
-        type: snapshot.modelName
-      }
+        type: snapshot.modelName,
+      },
     });
   };
 
@@ -121,11 +217,11 @@ test("The store can materialize a non loaded monomorphic belongsTo association",
           user: {
             data: {
               id: '2',
-              type: 'user'
-            }
-          }
-        }
-      }
+              type: 'user',
+            },
+          },
+        },
+      },
     });
   });
 
@@ -136,96 +232,149 @@ test("The store can materialize a non loaded monomorphic belongsTo association",
   });
 });
 
-testInDebug("Only a record of the same modelClass can be used with a monomorphic belongsTo relationship", function(assert) {
-  assert.expect(1);
-  env.adapter.shouldBackgroundReloadRecord = () => false;
-  run(() => {
-    store.push({
-      data: {
-        id: '1',
-        type: 'post'
-      }
-    });
-    store.push({
-      data: {
-        id: '2',
-        type: 'comment'
-      }
-    });
-  });
+testInDebug('Invalid belongsTo relationship identifiers throw errors', function(assert) {
+  assert.expect(2);
+  let { store } = env;
 
-
-  return run(() => {
-    return hash({
-      post: store.findRecord('post', 1),
-      comment: store.findRecord('comment', 2)
-    }).then(records => {
-      assert.expectAssertion(() => {
-        records.post.set('user', records.comment);
-      }, /You cannot add a record of modelClass 'comment' to the 'post.user' relationship/);
+  // test null id
+  assert.expectAssertion(() => {
+    run(() => {
+      let post = store.push({
+        data: {
+          id: '1',
+          type: 'post',
+          relationships: {
+            user: {
+              data: {
+                id: null,
+                type: 'user',
+              },
+            },
+          },
+        },
+      });
+      post.get('user');
     });
-  });
+  }, `Assertion Failed: Encountered a relationship identifier without an id for the belongsTo relationship 'user' on <post:1>, expected a json-api identifier but found '{"id":null,"type":"user"}'. Please check your serializer and make sure it is serializing the relationship payload into a JSON API format.`);
+
+  // test missing type
+  assert.expectAssertion(() => {
+    run(() => {
+      let post = store.push({
+        data: {
+          id: '2',
+          type: 'post',
+          relationships: {
+            user: {
+              data: {
+                id: '1',
+                type: null,
+              },
+            },
+          },
+        },
+      });
+      post.get('user');
+    });
+  }, `Assertion Failed: Encountered a relationship identifier without a type for the belongsTo relationship 'user' on <post:2>, expected a json-api identifier with type 'user' but found '{"id":"1","type":null}'. Please check your serializer and make sure it is serializing the relationship payload into a JSON API format.`);
 });
 
-testInDebug("Only a record of the same base modelClass can be used with a polymorphic belongsTo relationship", function(assert) {
-  env.adapter.shouldBackgroundReloadRecord = () => false;
-  assert.expect(1);
-  run(() => {
-    store.push({
-      data: [{
-        id: '1',
-        type: 'comment'
-      },
-      {
-        id: '2',
-        type: 'comment'
-      }]
-    });
-    store.push({
-      data: {
-        id: '1',
-        type: 'post'
-      }
-    });
-    store.push({
-      data: {
-        id: '3',
-        type: 'user'
-      }
+testInDebug(
+  'Only a record of the same modelClass can be used with a monomorphic belongsTo relationship',
+  function(assert) {
+    assert.expect(1);
+    env.adapter.shouldBackgroundReloadRecord = () => false;
+    run(() => {
+      store.push({
+        data: {
+          id: '1',
+          type: 'post',
+        },
+      });
+      store.push({
+        data: {
+          id: '2',
+          type: 'comment',
+        },
+      });
     });
 
-  });
+    return run(() => {
+      return hash({
+        post: store.findRecord('post', 1),
+        comment: store.findRecord('comment', 2),
+      }).then(records => {
+        assert.expectAssertion(() => {
+          records.post.set('user', records.comment);
+        }, /You cannot add a record of modelClass 'comment' to the 'post.user' relationship/);
+      });
+    });
+  }
+);
 
-  return run(() => {
-    let asyncRecords = hash({
-      user: store.findRecord('user', 3),
-      post: store.findRecord('post', 1),
-      comment: store.findRecord('comment', 1),
-      anotherComment: store.findRecord('comment', 2)
+testInDebug(
+  'Only a record of the same base modelClass can be used with a polymorphic belongsTo relationship',
+  function(assert) {
+    env.adapter.shouldBackgroundReloadRecord = () => false;
+    assert.expect(1);
+    run(() => {
+      store.push({
+        data: [
+          {
+            id: '1',
+            type: 'comment',
+          },
+          {
+            id: '2',
+            type: 'comment',
+          },
+        ],
+      });
+      store.push({
+        data: {
+          id: '1',
+          type: 'post',
+        },
+      });
+      store.push({
+        data: {
+          id: '3',
+          type: 'user',
+        },
+      });
     });
 
-    return asyncRecords.then(records =>  {
-      let comment = records.comment;
+    return run(() => {
+      let asyncRecords = hash({
+        user: store.findRecord('user', 3),
+        post: store.findRecord('post', 1),
+        comment: store.findRecord('comment', 1),
+        anotherComment: store.findRecord('comment', 2),
+      });
 
-      comment.set('message', records.anotherComment);
-      comment.set('message', records.post);
-      comment.set('message', null);
+      return asyncRecords.then(records => {
+        let comment = records.comment;
 
-      assert.expectAssertion(() => {
-        comment.set('message', records.user);
-      }, /You cannot add a record of modelClass 'user' to the 'comment.message' relationship \(only 'message' allowed\)/);
+        comment.set('message', records.anotherComment);
+        comment.set('message', records.post);
+        comment.set('message', null);
+
+        assert.expectAssertion(() => {
+          comment.set('message', records.user);
+        }, /You cannot add a record of modelClass 'user' to the 'comment.message' relationship \(only 'message' allowed\)/);
+      });
     });
-  });
-});
+  }
+);
 
-test("The store can load a polymorphic belongsTo association", function(assert) {
+test('The store can load a polymorphic belongsTo association', function(assert) {
   env.adapter.shouldBackgroundReloadRecord = () => false;
   run(() => {
     env.store.push({
       data: {
         id: '1',
-        type: 'post'
-      }
+        type: 'post',
+      },
     });
 
     env.store.push({
@@ -236,39 +385,39 @@ test("The store can load a polymorphic belongsTo association", function(assert) 
           message: {
             data: {
               id: '1',
-              type: 'post'
-            }
-          }
-        }
-      }
+              type: 'post',
+            },
+          },
+        },
+      },
     });
   });
 
   return run(() => {
     return hash({
       message: store.findRecord('post', 1),
-      comment: store.findRecord('comment', 2)
+      comment: store.findRecord('comment', 2),
     }).then(records => {
       assert.equal(records.comment.get('message'), records.message);
     });
   });
 });
 
-test("The store can serialize a polymorphic belongsTo association", function(assert) {
+test('The store can serialize a polymorphic belongsTo association', function(assert) {
   env.adapter.shouldBackgroundReloadRecord = () => false;
   let serializerInstance = store.serializerFor('comment');
 
   serializerInstance.serializePolymorphicType = function(record, json, relationship) {
     assert.ok(true, "The serializer's serializePolymorphicType method should be called");
-    json["message_type"] = "post";
+    json['message_type'] = 'post';
   };
 
   return run(() => {
     env.store.push({
       data: {
         id: '1',
-        type: 'post'
-      }
+        type: 'post',
+      },
     });
 
     env.store.push({
@@ -279,11 +428,11 @@ test("The store can serialize a polymorphic belongsTo association", function(ass
           message: {
             data: {
               id: '1',
-              type: 'post'
-            }
-          }
-        }
-      }
+              type: 'post',
+            },
+          },
+        },
+      },
     });
 
     return store.findRecord('comment', 2).then(comment => {
@@ -294,14 +443,14 @@ test("The store can serialize a polymorphic belongsTo association", function(ass
   });
 });
 
-test("A serializer can materialize a belongsTo as a link that gets sent back to findBelongsTo", function(assert) {
+test('A serializer can materialize a belongsTo as a link that gets sent back to findBelongsTo', function(assert) {
   env.adapter.shouldBackgroundReloadRecord = () => false;
   let Group = DS.Model.extend({
-    people: DS.hasMany('person', { async: false })
+    people: DS.hasMany('person', { async: false }),
   });
 
   let Person = DS.Model.extend({
-    group: DS.belongsTo({ async: true })
+    group: DS.belongsTo({ async: true }),
   });
 
   env.registry.register('model:group', Group);
@@ -315,11 +464,11 @@ test("A serializer can materialize a belongsTo as a link that gets sent back to 
         relationships: {
           group: {
             links: {
-              related: '/people/1/group'
-            }
-          }
-        }
-      }
+              related: '/people/1/group',
+            },
+          },
+        },
+      },
     });
   });
 
@@ -330,7 +479,7 @@ test("A serializer can materialize a belongsTo as a link that gets sent back to 
   env.adapter.findBelongsTo = function(store, snapshot, link, relationship) {
     assert.equal(relationship.type, 'group');
     assert.equal(relationship.key, 'group');
-    assert.equal(link, "/people/1/group");
+    assert.equal(link, '/people/1/group');
 
     return resolve({
       data: {
@@ -338,31 +487,34 @@ test("A serializer can materialize a belongsTo as a link that gets sent back to 
         type: 'group',
         relationships: {
           people: {
-            data: [{ id: 1, type: 'person' }]
-          }
-        }
-      }
+            data: [{ id: 1, type: 'person' }],
+          },
+        },
+      },
     });
   };
 
   return run(() => {
-    return env.store.findRecord('person', 1).then(person => {
-      return person.get('group');
-    }).then(group => {
-      assert.ok(group instanceof Group, "A group object is loaded");
-      assert.ok(group.get('id') === '1', 'It is the group we are expecting');
-    });
+    return env.store
+      .findRecord('person', 1)
+      .then(person => {
+        return person.get('group');
+      })
+      .then(group => {
+        assert.ok(group instanceof Group, 'A group object is loaded');
+        assert.ok(group.get('id') === '1', 'It is the group we are expecting');
+      });
   });
 });
 
 test('A record with an async belongsTo relationship always returns a promise for that relationship', function(assert) {
   env.adapter.shouldBackgroundReloadRecord = () => false;
   let Seat = DS.Model.extend({
-    person: DS.belongsTo('person', { async: false })
+    person: DS.belongsTo('person', { async: false }),
   });
 
   let Person = DS.Model.extend({
-    seat: DS.belongsTo('seat', { async: true })
+    seat: DS.belongsTo('seat', { async: true }),
   });
 
   env.registry.register('model:seat', Seat);
@@ -376,11 +528,11 @@ test('A record with an async belongsTo relationship always returns a promise for
         relationships: {
           seat: {
             links: {
-              related: '/people/1/seat'
-            }
-          }
-        }
-      }
+              related: '/people/1/seat',
+            },
+          },
+        },
+      },
     });
   });
 
@@ -404,16 +556,16 @@ test('A record with an async belongsTo relationship always returns a promise for
   });
 });
 
-test("A record with an async belongsTo relationship returning null should resolve null", function(assert) {
+test('A record with an async belongsTo relationship returning null should resolve null', function(assert) {
   assert.expect(1);
 
   env.adapter.shouldBackgroundReloadRecord = () => false;
   let Group = DS.Model.extend({
-    people: DS.hasMany('person', { async: false })
+    people: DS.hasMany('person', { async: false }),
   });
 
   let Person = DS.Model.extend({
-    group: DS.belongsTo({ async: true })
+    group: DS.belongsTo({ async: true }),
   });
 
   env.registry.register('model:group', Group);
@@ -427,11 +579,11 @@ test("A record with an async belongsTo relationship returning null should resolv
         relationships: {
           group: {
             links: {
-              related: '/people/1/group'
-            }
-          }
-        }
-      }
+              related: '/people/1/group',
+            },
+          },
+        },
+      },
     });
   });
 
@@ -443,23 +595,26 @@ test("A record with an async belongsTo relationship returning null should resolv
     return resolve({ data: null });
   };
 
-  return env.store.findRecord('person', '1').then(person => {
-    return person.get('group');
-  }).then(group => {
-    assert.ok(group === null, "group should be null");
-  });
+  return env.store
+    .findRecord('person', '1')
+    .then(person => {
+      return person.get('group');
+    })
+    .then(group => {
+      assert.ok(group === null, 'group should be null');
+    });
 });
 
-test("A record can be created with a resolved belongsTo promise", function(assert) {
+test('A record can be created with a resolved belongsTo promise', function(assert) {
   assert.expect(1);
 
   env.adapter.shouldBackgroundReloadRecord = () => false;
   let Group = DS.Model.extend({
-    people: DS.hasMany('person', { async: false })
+    people: DS.hasMany('person', { async: false }),
   });
 
   let Person = DS.Model.extend({
-    group: DS.belongsTo({ async: true })
+    group: DS.belongsTo({ async: true }),
   });
 
   env.registry.register('model:group', Group);
@@ -469,21 +624,21 @@ test("A record can be created with a resolved belongsTo promise", function(asser
     store.push({
       data: {
         id: 1,
-        type: 'group'
-      }
+        type: 'group',
+      },
     });
   });
 
   let groupPromise = store.findRecord('group', 1);
   return groupPromise.then(group => {
     let person = env.store.createRecord('person', {
-      group: groupPromise
+      group: groupPromise,
     });
     assert.equal(person.get('group.content'), group);
   });
 });
 
-test("polymorphic belongsTo class-checks check the superclass when MODEL_FACTORY_INJECTIONS is enabled", function(assert) {
+test('polymorphic belongsTo class-checks check the superclass when MODEL_FACTORY_INJECTIONS is enabled', function(assert) {
   assert.expect(1);
 
   run(() => {
@@ -496,7 +651,7 @@ test("polymorphic belongsTo class-checks check the superclass when MODEL_FACTORY
   });
 });
 
-test("the subclass in a polymorphic belongsTo relationship is an instanceof its superclass", function(assert) {
+test('the subclass in a polymorphic belongsTo relationship is an instanceof its superclass', function(assert) {
   setupModelFactoryInjections(false);
   assert.expect(1);
 
@@ -505,8 +660,7 @@ test("the subclass in a polymorphic belongsTo relationship is an instanceof its 
   assert.ok(comment instanceof Message, 'a comment is an instance of a message');
 });
 
-test("relationshipsByName does not cache a factory", function(assert) {
-
+test('relationshipsByName does not cache a factory', function(assert) {
   // The model is loaded up via a container. It has relationshipsByName
   // called on it.
   let modelViaFirstFactory = store.modelFor('user');
@@ -522,25 +676,28 @@ test("relationshipsByName does not cache a factory", function(assert) {
   // A new store is created.
   env = setupStore({
     user: User,
-    message: NewMessage
+    message: NewMessage,
   });
   store = env.store;
 
   // relationshipsByName is called again.
   let modelViaSecondFactory = store.modelFor('user');
-  let relationshipsByName   = get(modelViaSecondFactory, 'relationshipsByName');
-  let messageType           = relationshipsByName.get('messages').type;
+  let relationshipsByName = get(modelViaSecondFactory, 'relationshipsByName');
+  let messageType = relationshipsByName.get('messages').type;
 
   // A model is looked up in the store based on a string, via user input
-  let messageModelFromStore        = store.modelFor('message');
+  let messageModelFromStore = store.modelFor('message');
   // And the model is lookup up internally via the relationship type
   let messageModelFromRelationType = store.modelFor(messageType);
 
-  assert.equal(messageModelFromRelationType, messageModelFromStore,
-        "model factory based on relationship type matches the model based on store.modelFor");
+  assert.equal(
+    messageModelFromRelationType,
+    messageModelFromStore,
+    'model factory based on relationship type matches the model based on store.modelFor'
+  );
 });
 
-test("relationship changes shouldn’t cause async fetches", function(assert) {
+test('relationship changes shouldn’t cause async fetches', function(assert) {
   assert.expect(2);
 
   /*  Scenario:
@@ -559,12 +716,12 @@ test("relationship changes shouldn’t cause async fetches", function(assert) {
   env.store.modelFor('post').reopen({
     comments: DS.hasMany('comment', {
       async: true,
-      inverse: 'post'
-    })
+      inverse: 'post',
+    }),
   });
 
   env.store.modelFor('comment').reopen({
-    post: DS.belongsTo('post', { async: false })
+    post: DS.belongsTo('post', { async: false }),
   });
   let comment;
   run(() => {
@@ -574,19 +731,23 @@ test("relationship changes shouldn’t cause async fetches", function(assert) {
         type: 'post',
         relationships: {
           comments: {
-            data: [{
-              id: '1',
-              type: 'comment'
-            }, {
-              id: '2',
-              type: 'comment'
-            }, {
-              id: '3',
-              type: 'comment'
-            }]
-          }
-        }
-      }
+            data: [
+              {
+                id: '1',
+                type: 'comment',
+              },
+              {
+                id: '2',
+                type: 'comment',
+              },
+              {
+                id: '3',
+                type: 'comment',
+              },
+            ],
+          },
+        },
+      },
     });
 
     comment = env.store.push({
@@ -597,11 +758,11 @@ test("relationship changes shouldn’t cause async fetches", function(assert) {
           post: {
             data: {
               id: '1',
-              type: 'post'
-            }
-          }
-        }
-      }
+              type: 'post',
+            },
+          },
+        },
+      },
     });
   });
 
@@ -618,21 +779,21 @@ test("relationship changes shouldn’t cause async fetches", function(assert) {
   run(comment, 'destroyRecord');
 });
 
-test("Destroying a record with an unloaded aync belongsTo association does not fetch the record", function(assert) {
+test('Destroying a record with an unloaded aync belongsTo association does not fetch the record', function(assert) {
   assert.expect(2);
   let post;
 
   env.store.modelFor('message').reopen({
     user: DS.hasMany('user', {
-      async: true
-    })
+      async: true,
+    }),
   });
 
   env.store.modelFor('post').reopen({
     user: DS.belongsTo('user', {
       async: true,
-      inverse: 'messages'
-    })
+      inverse: 'messages',
+    }),
   });
 
   run(() => {
@@ -644,11 +805,11 @@ test("Destroying a record with an unloaded aync belongsTo association does not f
           user: {
             data: {
               id: '2',
-              type: 'user'
-            }
-          }
-        }
-      }
+              type: 'user',
+            },
+          },
+        },
+      },
     });
   });
 
@@ -665,24 +826,24 @@ test("Destroying a record with an unloaded aync belongsTo association does not f
         type: 'post',
         attributes: {
           title: null,
-          'created-at': null
+          'created-at': null,
         },
         relationships: {
           user: {
             data: {
               id: '2',
-              type: 'user'
-            }
-          }
-        }
-      }
+              type: 'user',
+            },
+          },
+        },
+      },
     };
   };
 
   run(post, 'destroyRecord');
 });
 
-testInDebug("A sync belongsTo errors out if the record is unlaoded", function(assert) {
+testInDebug('A sync belongsTo errors out if the record is unlaoded', function(assert) {
   let message;
   run(() => {
     message = env.store.push({
@@ -693,13 +854,12 @@ testInDebug("A sync belongsTo errors out if the record is unlaoded", function(as
           user: {
             data: {
               id: '2',
-              type: 'user'
-            }
-          }
-        }
-      }
+              type: 'user',
+            },
+          },
+        },
+      },
     });
-
   });
 
   assert.expectAssertion(() => {
@@ -707,9 +867,9 @@ testInDebug("A sync belongsTo errors out if the record is unlaoded", function(as
   }, /You looked up the 'user' relationship on a 'message' with id 1 but some of the associated records were not loaded. Either make sure they are all loaded together with the parent record, or specify that the relationship is async \(`DS.belongsTo\({ async: true }\)`\)/);
 });
 
-test("Rollbacking attributes for a deleted record restores implicit relationship - async", function(assert) {
+test('Rollbacking attributes for a deleted record restores implicit relationship - async', function(assert) {
   Book.reopen({
-    author: DS.belongsTo('author', { async: true })
+    author: DS.belongsTo('author', { async: true }),
   });
   let book, author;
   run(() => {
@@ -718,28 +878,27 @@ test("Rollbacking attributes for a deleted record restores implicit relationship
         id: '1',
         type: 'book',
         attributes: {
-          name: "Stanley's Amazing Adventures"
+          name: "Stanley's Amazing Adventures",
         },
         relationships: {
           author: {
             data: {
               id: '2',
-              type: 'author'
-            }
-          }
-        }
-      }
+              type: 'author',
+            },
+          },
+        },
+      },
     });
     author = env.store.push({
       data: {
         id: '2',
         type: 'author',
         attributes: {
-          name: 'Stanley'
-        }
-      }
+          name: 'Stanley',
+        },
+      },
     });
-
   });
   return run(() => {
     author.deleteRecord();
@@ -751,7 +910,7 @@ test("Rollbacking attributes for a deleted record restores implicit relationship
   });
 });
 
-test("Rollbacking attributes for a deleted record restores implicit relationship - sync", function(assert) {
+test('Rollbacking attributes for a deleted record restores implicit relationship - sync', function(assert) {
   let book, author;
 
   run(() => {
@@ -760,17 +919,17 @@ test("Rollbacking attributes for a deleted record restores implicit relationship
         id: '1',
         type: 'book',
         attributes: {
-          name: "Stanley's Amazing Adventures"
+          name: "Stanley's Amazing Adventures",
         },
         relationships: {
           author: {
             data: {
               id: '2',
-              type: 'author'
-            }
-          }
-        }
-      }
+              type: 'author',
+            },
+          },
+        },
+      },
     });
 
     author = env.store.push({
@@ -778,13 +937,13 @@ test("Rollbacking attributes for a deleted record restores implicit relationship
         id: '2',
         type: 'author',
         attributes: {
-          name: "Stanley"
-        }
-      }
+          name: 'Stanley',
+        },
+      },
     });
   });
 
-  run(() =>{
+  run(() => {
     author.deleteRecord();
     author.rollbackAttributes();
   });
@@ -792,23 +951,23 @@ test("Rollbacking attributes for a deleted record restores implicit relationship
   assert.equal(book.get('author'), author, 'Book has an author after rollback attributes');
 });
 
-testInDebug("Passing a model as type to belongsTo should not work", function(assert) {
+testInDebug('Passing a model as type to belongsTo should not work', function(assert) {
   assert.expect(1);
 
   assert.expectAssertion(() => {
     User = DS.Model.extend();
 
     DS.Model.extend({
-      user: belongsTo(User, { async: false })
+      user: belongsTo(User, { async: false }),
     });
   }, /The first argument to DS.belongsTo must be a string/);
 });
 
-test("belongsTo hasData async loaded", function(assert) {
+test('belongsTo hasAnyRelationshipData async loaded', function(assert) {
   assert.expect(1);
 
   Book.reopen({
-    author: belongsTo('author', { async: true })
+    author: belongsTo('author', { async: true }),
   });
 
   env.adapter.findRecord = function(store, type, id, snapshot) {
@@ -818,21 +977,21 @@ test("belongsTo hasData async loaded", function(assert) {
         type: 'book',
         attributes: { name: 'The Greatest Book' },
         relationships: {
-          author: { data: { id: 2, type: 'author'} }
-        }
-      }
+          author: { data: { id: 2, type: 'author' } },
+        },
+      },
     });
   };
 
   return run(() => {
     return store.findRecord('book', 1).then(book => {
       let relationship = book._internalModel._relationships.get('author');
-      assert.equal(relationship.hasData, true, 'relationship has data');
+      assert.equal(relationship.hasAnyRelationshipData, true, 'relationship has data');
     });
   });
 });
 
-test("belongsTo hasData sync loaded", function(assert) {
+test('belongsTo hasAnyRelationshipData sync loaded', function(assert) {
   assert.expect(1);
 
   env.adapter.findRecord = function(store, type, id, snapshot) {
@@ -842,25 +1001,25 @@ test("belongsTo hasData sync loaded", function(assert) {
         type: 'book',
         attributes: { name: 'The Greatest Book' },
         relationships: {
-          author: { data: { id: 2, type: 'author'} }
-        }
-      }
+          author: { data: { id: 2, type: 'author' } },
+        },
+      },
     });
   };
 
   return run(() => {
     return store.findRecord('book', 1).then(book => {
       let relationship = book._internalModel._relationships.get('author');
-      assert.equal(relationship.hasData, true, 'relationship has data');
+      assert.equal(relationship.hasAnyRelationshipData, true, 'relationship has data');
     });
   });
 });
 
-test("belongsTo hasData async not loaded", function(assert) {
+test('belongsTo hasAnyRelationshipData async not loaded', function(assert) {
   assert.expect(1);
 
   Book.reopen({
-    author: belongsTo('author', { async: true })
+    author: belongsTo('author', { async: true }),
   });
 
   env.adapter.findRecord = function(store, type, id, snapshot) {
@@ -870,21 +1029,21 @@ test("belongsTo hasData async not loaded", function(assert) {
         type: 'book',
         attributes: { name: 'The Greatest Book' },
         relationships: {
-          author: { links: { related: 'author'} }
-        }
-      }
+          author: { links: { related: 'author' } },
+        },
+      },
     });
   };
 
   return run(() => {
     return store.findRecord('book', 1).then(book => {
       let relationship = book._internalModel._relationships.get('author');
-      assert.equal(relationship.hasData, false, 'relationship does not have data');
+      assert.equal(relationship.hasAnyRelationshipData, false, 'relationship does not have data');
     });
   });
 });
 
-test("belongsTo hasData sync not loaded", function(assert) {
+test('belongsTo hasAnyRelationshipData sync not loaded', function(assert) {
   assert.expect(1);
 
   env.adapter.findRecord = function(store, type, id, snapshot) {
@@ -892,24 +1051,24 @@ test("belongsTo hasData sync not loaded", function(assert) {
       data: {
         id: 1,
         type: 'book',
-        attributes: { name: 'The Greatest Book' }
-      }
+        attributes: { name: 'The Greatest Book' },
+      },
     });
-  }
+  };
 
   return run(() => {
     return store.findRecord('book', 1).then(book => {
       let relationship = book._internalModel._relationships.get('author');
-      assert.equal(relationship.hasData, false, 'relationship does not have data');
+      assert.equal(relationship.hasAnyRelationshipData, false, 'relationship does not have data');
     });
   });
 });
 
-test("belongsTo hasData NOT created", function(assert) {
+test('belongsTo hasAnyRelationshipData NOT created', function(assert) {
   assert.expect(2);
 
   Book.reopen({
-    author: belongsTo('author', { async: true })
+    author: belongsTo('author', { async: true }),
   });
 
   run(() => {
@@ -917,38 +1076,38 @@ test("belongsTo hasData NOT created", function(assert) {
     let book = store.createRecord('book', { name: 'The Greatest Book' });
     let relationship = book._internalModel._relationships.get('author');
 
-    assert.equal(relationship.hasData, false, 'relationship does not have data');
+    assert.equal(relationship.hasAnyRelationshipData, false, 'relationship does not have data');
 
     book = store.createRecord('book', {
       name: 'The Greatest Book',
-      author
+      author,
     });
 
     relationship = book._internalModel._relationships.get('author');
 
-    assert.equal(relationship.hasData, true, 'relationship has data');
+    assert.equal(relationship.hasAnyRelationshipData, true, 'relationship has data');
   });
 });
 
-test("belongsTo hasData sync created", function(assert) {
+test('belongsTo hasAnyRelationshipData sync created', function(assert) {
   assert.expect(2);
 
   run(() => {
     let author = store.createRecord('author');
     let book = store.createRecord('book', {
-      name: 'The Greatest Book'
+      name: 'The Greatest Book',
     });
 
     let relationship = book._internalModel._relationships.get('author');
-    assert.equal(relationship.hasData, false, 'relationship does not have data');
+    assert.equal(relationship.hasAnyRelationshipData, false, 'relationship does not have data');
 
     book = store.createRecord('book', {
       name: 'The Greatest Book',
-      author
+      author,
     });
 
     relationship = book._internalModel._relationships.get('author');
-    assert.equal(relationship.hasData, true, 'relationship has data');
+    assert.equal(relationship.hasAnyRelationshipData, true, 'relationship has data');
   });
 });
 
@@ -959,11 +1118,14 @@ test("Model's belongsTo relationship should not be created during model creation
     user = env.store.push({
       data: {
         id: '1',
-        type: 'user'
-      }
+        type: 'user',
+      },
     });
 
-    assert.ok(!user._internalModel._relationships.has('favouriteMessage'), 'Newly created record should not have relationships');
+    assert.ok(
+      !user._internalModel._relationships.has('favouriteMessage'),
+      'Newly created record should not have relationships'
+    );
   });
 });
 
@@ -971,10 +1133,13 @@ test("Model's belongsTo relationship should be created during model creation if 
   let message = env.store.createRecord('message');
   let user = env.store.createRecord('user', {
     name: 'John Doe',
-    favouriteMessage: message
+    favouriteMessage: message,
   });
 
-  assert.ok(user._internalModel._relationships.has('favouriteMessage'), "Newly created record with relationships in params passed in its constructor should have relationships");
+  assert.ok(
+    user._internalModel._relationships.has('favouriteMessage'),
+    'Newly created record with relationships in params passed in its constructor should have relationships'
+  );
 });
 
 test("Model's belongsTo relationship should be created during 'set' method", function(assert) {
@@ -984,7 +1149,10 @@ test("Model's belongsTo relationship should be created during 'set' method", fun
     message = env.store.createRecord('message');
     user = env.store.createRecord('user');
     user.set('favouriteMessage', message);
-    assert.ok(user._internalModel._relationships.has('favouriteMessage'), "Newly created record with relationships in params passed in its constructor should have relationships");
+    assert.ok(
+      user._internalModel._relationships.has('favouriteMessage'),
+      'Newly created record with relationships in params passed in its constructor should have relationships'
+    );
   });
 });
 
@@ -994,15 +1162,18 @@ test("Model's belongsTo relationship should be created during 'get' method", fun
   run(() => {
     user = env.store.createRecord('user');
     user.get('favouriteMessage');
-    assert.ok(user._internalModel._relationships.has('favouriteMessage'), "Newly created record with relationships in params passed in its constructor should have relationships");
+    assert.ok(
+      user._internalModel._relationships.has('favouriteMessage'),
+      'Newly created record with relationships in params passed in its constructor should have relationships'
+    );
   });
 });
 
-test("Related link should be fetched when no local data is present", function(assert) {
+test('Related link should be fetched when no relationship data is present', function(assert) {
   assert.expect(3);
 
   Book.reopen({
-    author: DS.belongsTo('author', { async: true })
+    author: DS.belongsTo('author', { async: true }),
   });
 
   env.adapter.findBelongsTo = function(store, snapshot, url, relationship) {
@@ -1010,10 +1181,10 @@ test("Related link should be fetched when no local data is present", function(as
     assert.ok(true, "The adapter's findBelongsTo method should be called");
     return resolve({
       data: {
-        id: 1,
+        id: '1',
         type: 'author',
-        attributes: { name: 'This is author' }
-      }
+        attributes: { name: 'This is author' },
+      },
     });
   };
 
@@ -1025,11 +1196,11 @@ test("Related link should be fetched when no local data is present", function(as
         relationships: {
           author: {
             links: {
-              related: 'author'
-            }
-          }
-        }
-      }
+              related: 'author',
+            },
+          },
+        },
+      },
     });
 
     return book.get('author').then(author => {
@@ -1038,25 +1209,66 @@ test("Related link should be fetched when no local data is present", function(as
   });
 });
 
-test("Local data should take precedence over related link", function(assert) {
+test('Related link should take precedence over relationship data if no local record data is available', function(assert) {
+  assert.expect(2);
+
+  Book.reopen({
+    author: DS.belongsTo('author', { async: true }),
+  });
+
+  env.adapter.findBelongsTo = function(store, snapshot, url, relationship) {
+    assert.ok(true, "The adapter's findBelongsTo method should be called");
+    return resolve({
+      data: {
+        id: 1,
+        type: 'author',
+        attributes: { name: 'This is author' },
+      },
+    });
+  };
+
+  env.adapter.findRecord = function() {
+    assert.ok(false, "The adapter's findRecord method should not be called");
+  };
+
+  return run(() => {
+    let book = env.store.push({
+      data: {
+        type: 'book',
+        id: '1',
+        relationships: {
+          author: {
+            links: {
+              related: 'author',
+            },
+            data: { type: 'author', id: '1' },
+          },
+        },
+      },
+    });
+
+    return book.get('author').then(author => {
+      assert.equal(author.get('name'), 'This is author', 'author name is correct');
+    });
+  });
+});
+
+test('Relationship data should take precedence over related link when local record data is available', function(assert) {
   assert.expect(1);
 
   Book.reopen({
-    author: DS.belongsTo('author', { async: true })
+    author: DS.belongsTo('author', { async: true }),
   });
 
+  env.adapter.shouldBackgroundReloadRecord = () => {
+    return false;
+  };
   env.adapter.findBelongsTo = function(store, snapshot, url, relationship) {
     assert.ok(false, "The adapter's findBelongsTo method should not be called");
   };
 
   env.adapter.findRecord = function(store, type, id, snapshot) {
-    return resolve({
-      data: {
-        id: 1,
-        type: 'author',
-        attributes: { name: 'This is author' }
-      }
-    });
+    assert.ok(false, "The adapter's findRecord method should not be called");
   };
 
   return run(() => {
@@ -1067,12 +1279,19 @@ test("Local data should take precedence over related link", function(assert) {
         relationships: {
           author: {
             links: {
-              related: 'author'
+              related: 'author',
             },
-            data: { type: 'author', id: '1' }
-          }
-        }
-      }
+            data: { type: 'author', id: '1' },
+          },
+        },
+      },
+      included: [
+        {
+          id: '1',
+          type: 'author',
+          attributes: { name: 'This is author' },
+        },
+      ],
     });
 
     return book.get('author').then(author => {
@@ -1081,11 +1300,11 @@ test("Local data should take precedence over related link", function(assert) {
   });
 });
 
-test("New related link should take precedence over local data", function(assert) {
+test('New related link should take precedence over local data', function(assert) {
   assert.expect(3);
 
   Book.reopen({
-    author: DS.belongsTo('author', { async: true })
+    author: DS.belongsTo('author', { async: true }),
   });
 
   env.adapter.findBelongsTo = function(store, snapshot, url, relationship) {
@@ -1095,8 +1314,8 @@ test("New related link should take precedence over local data", function(assert)
       data: {
         id: 1,
         type: 'author',
-        attributes: { name: 'This is author' }
-      }
+        attributes: { name: 'This is author' },
+      },
     });
   };
 
@@ -1113,11 +1332,11 @@ test("New related link should take precedence over local data", function(assert)
           author: {
             data: {
               type: 'author',
-              id: '1'
-            }
-          }
-        }
-      }
+              id: '1',
+            },
+          },
+        },
+      },
     });
 
     env.store.push({
@@ -1127,24 +1346,24 @@ test("New related link should take precedence over local data", function(assert)
         relationships: {
           author: {
             links: {
-              related: 'author-new-link'
-            }
-          }
-        }
-      }
+              related: 'author-new-link',
+            },
+          },
+        },
+      },
     });
 
-    book.get('author').then((author) => {
+    book.get('author').then(author => {
       assert.equal(author.get('name'), 'This is author', 'author name is correct');
     });
   });
 });
 
-test("Updated related link should take precedence over local data", function(assert) {
+test('Updated related link should take precedence over relationship data and local record data', function(assert) {
   assert.expect(4);
 
   Book.reopen({
-    author: DS.belongsTo('author', { async: true })
+    author: DS.belongsTo('author', { async: true }),
   });
 
   env.adapter.findBelongsTo = function(store, snapshot, url, relationship) {
@@ -1152,10 +1371,12 @@ test("Updated related link should take precedence over local data", function(ass
     assert.ok(true, "The adapter's findBelongsTo method should be called");
     return resolve({
       data: {
-        id: 1,
+        id: '1',
         type: 'author',
-        attributes: { name: 'This is updated author' }
-      }
+        attributes: {
+          name: 'This is updated author',
+        },
+      },
     });
   };
 
@@ -1171,50 +1392,55 @@ test("Updated related link should take precedence over local data", function(ass
         relationships: {
           author: {
             links: {
-              related: 'author'
+              related: 'author',
             },
-            data: { type: 'author', id: '1' }
-          }
-        }
+            data: { type: 'author', id: '1' },
+          },
+        },
       },
-      included: [{
-        type: 'author',
-        id: '1',
-        attributes: {
-          name: 'This is author'
-        }
-      }]
-    });
-
-    return book.get('author').then((author) => {
-      assert.equal(author.get('name'), 'This is author', 'author name is correct');
-    }).then(() => {
-      env.store.push({
-        data: {
-          type: 'book',
+      included: [
+        {
+          type: 'author',
           id: '1',
-          relationships: {
-            author: {
-              links: {
-                related: 'author-updated-link'
-              }
-            }
-          }
-        }
-      });
-
-      return book.get('author').then((author) => {
-        assert.equal(author.get('name'), 'This is updated author', 'author name is correct');
-      });
+          attributes: {
+            name: 'This is author',
+          },
+        },
+      ],
     });
+
+    return book
+      .get('author')
+      .then(author => {
+        assert.equal(author.get('name'), 'This is author', 'author name is correct');
+      })
+      .then(() => {
+        env.store.push({
+          data: {
+            type: 'book',
+            id: '1',
+            relationships: {
+              author: {
+                links: {
+                  related: 'author-updated-link',
+                },
+              },
+            },
+          },
+        });
+
+        return book.get('author').then(author => {
+          assert.equal(author.get('name'), 'This is updated author', 'author name is correct');
+        });
+      });
   });
 });
 
-test("Updated identical related link should not take precedence over local data", function(assert) {
+test('Updated identical related link should not take precedence over local data', function(assert) {
   assert.expect(2);
 
   Book.reopen({
-    author: DS.belongsTo('author', { async: true })
+    author: DS.belongsTo('author', { async: true }),
   });
 
   env.adapter.findBelongsTo = function() {
@@ -1233,49 +1459,53 @@ test("Updated identical related link should not take precedence over local data"
         relationships: {
           author: {
             links: {
-              related: 'author'
+              related: 'author',
             },
-            data: { type: 'author', id: '1' }
-          }
-        }
+            data: { type: 'author', id: '1' },
+          },
+        },
       },
-      included: [{
-        type: 'author',
-        id: '1',
-        attributes: {
-          name: 'This is author'
-        }
-      }]
-    });
-
-    return book.get('author').then((author) => {
-      assert.equal(author.get('name'), 'This is author', 'author name is correct');
-    }).then(() => {
-
-      env.store.push({
-        data: {
-          type: 'book',
+      included: [
+        {
+          type: 'author',
           id: '1',
-          relationships: {
-            author: {
-              links: {
-                related: 'author'
-              }
-            }
-          }
-        }
-      });
-
-      return book.get('author').then((author) => {
-        assert.equal(author.get('name'), 'This is author', 'author name is correct');
-      });
+          attributes: {
+            name: 'This is author',
+          },
+        },
+      ],
     });
+
+    return book
+      .get('author')
+      .then(author => {
+        assert.equal(author.get('name'), 'This is author', 'author name is correct');
+      })
+      .then(() => {
+        env.store.push({
+          data: {
+            type: 'book',
+            id: '1',
+            relationships: {
+              author: {
+                links: {
+                  related: 'author',
+                },
+              },
+            },
+          },
+        });
+
+        return book.get('author').then(author => {
+          assert.equal(author.get('name'), 'This is author', 'author name is correct');
+        });
+      });
   });
 });
 
-test("A belongsTo relationship can be reloaded using the reference if it was fetched via link", function(assert) {
+test('A belongsTo relationship can be reloaded using the reference if it was fetched via link', function(assert) {
   Chapter.reopen({
-    book: DS.belongsTo({ async: true })
+    book: DS.belongsTo({ async: true }),
   });
 
   env.adapter.findRecord = function() {
@@ -1285,10 +1515,10 @@ test("A belongsTo relationship can be reloaded using the reference if it was fet
         type: 'chapter',
         relationships: {
           book: {
-            links: { related: '/books/1' }
-          }
-        }
-      }
+            links: { related: '/books/1' },
+          },
+        },
+      },
     });
   };
 
@@ -1297,41 +1527,45 @@ test("A belongsTo relationship can be reloaded using the reference if it was fet
       data: {
         id: 1,
         type: 'book',
-        attributes: { name: "book title" }
-      }
+        attributes: { name: 'book title' },
+      },
     });
   };
 
   return run(() => {
     let chapter;
 
-    return store.findRecord('chapter', 1).then(_chapter => {
-      chapter = _chapter;
+    return store
+      .findRecord('chapter', 1)
+      .then(_chapter => {
+        chapter = _chapter;
 
-      return chapter.get('book');
-    }).then(book =>  {
-      assert.equal(book.get('name'), "book title");
+        return chapter.get('book');
+      })
+      .then(book => {
+        assert.equal(book.get('name'), 'book title');
 
-      env.adapter.findBelongsTo = function() {
-        return resolve({
-          data: {
-            id: 1,
-            type: 'book',
-            attributes: { name: "updated book title" }
-          }
-        });
-      };
+        env.adapter.findBelongsTo = function() {
+          return resolve({
+            data: {
+              id: 1,
+              type: 'book',
+              attributes: { name: 'updated book title' },
+            },
+          });
+        };
 
-      return chapter.belongsTo('book').reload();
-    }).then(book => {
-      assert.equal(book.get('name'), "updated book title");
-    });
+        return chapter.belongsTo('book').reload();
+      })
+      .then(book => {
+        assert.equal(book.get('name'), 'updated book title');
+      });
   });
 });
 
-test("A sync belongsTo relationship can be reloaded using a reference if it was fetched via id", function(assert) {
+test('A synchronous belongsTo relationship can be reloaded using a reference if it was fetched via id', function(assert) {
   Chapter.reopen({
-    book: DS.belongsTo()
+    book: DS.belongsTo({ async: false }),
   });
 
   let chapter;
@@ -1339,48 +1573,51 @@ test("A sync belongsTo relationship can be reloaded using a reference if it was 
     chapter = env.store.push({
       data: {
         type: 'chapter',
-        id: 1,
+        id: '1',
         relationships: {
           book: {
-            data: { type: 'book', id: 1 }
-          }
-        }
-      }
+            data: { type: 'book', id: '1' },
+          },
+        },
+      },
     });
     env.store.push({
       data: {
         type: 'book',
-        id: 1,
+        id: '1',
         attributes: {
-          name: "book title"
-        }
-      }
+          name: 'book title',
+        },
+      },
     });
   });
 
   env.adapter.findRecord = function() {
     return resolve({
       data: {
-        id: 1,
+        id: '1',
         type: 'book',
-        attributes: { name: 'updated book title' }
-      }
+        attributes: { name: 'updated book title' },
+      },
     });
   };
 
   return run(() => {
     let book = chapter.get('book');
-    assert.equal(book.get('name'), "book title");
+    assert.equal(book.get('name'), 'book title');
 
-    return chapter.belongsTo('book').reload().then(function(book) {
-      assert.equal(book.get('name'), "updated book title");
-    });
+    return chapter
+      .belongsTo('book')
+      .reload()
+      .then(function(book) {
+        assert.equal(book.get('name'), 'updated book title');
+      });
   });
 });
 
-test("A belongsTo relationship can be reloaded using a reference if it was fetched via id", function(assert) {
+test('A belongsTo relationship can be reloaded using a reference if it was fetched via id', function(assert) {
   Chapter.reopen({
-    book: DS.belongsTo({ async: true })
+    book: DS.belongsTo({ async: true }),
   });
 
   let chapter;
@@ -1391,10 +1628,10 @@ test("A belongsTo relationship can be reloaded using a reference if it was fetch
         id: 1,
         relationships: {
           book: {
-            data: { type: 'book', id: 1 }
-          }
-        }
-      }
+            data: { type: 'book', id: 1 },
+          },
+        },
+      },
     });
   });
 
@@ -1403,54 +1640,60 @@ test("A belongsTo relationship can be reloaded using a reference if it was fetch
       data: {
         id: 1,
         type: 'book',
-        attributes: { name: "book title" }
-      }
+        attributes: { name: 'book title' },
+      },
     });
   };
 
   return run(() => {
-    return chapter.get('book').then(book => {
-      assert.equal(book.get('name'), "book title");
+    return chapter
+      .get('book')
+      .then(book => {
+        assert.equal(book.get('name'), 'book title');
 
-      env.adapter.findRecord = function() {
-        return resolve({
-          data: {
-            id: 1,
-            type: 'book',
-            attributes: { name: "updated book title" }
-          }
-        });
-      };
+        env.adapter.findRecord = function() {
+          return resolve({
+            data: {
+              id: 1,
+              type: 'book',
+              attributes: { name: 'updated book title' },
+            },
+          });
+        };
 
-      return chapter.belongsTo('book').reload();
-    }).then(book => {
-      assert.equal(book.get('name'), "updated book title");
-    });
+        return chapter.belongsTo('book').reload();
+      })
+      .then(book => {
+        assert.equal(book.get('name'), 'updated book title');
+      });
   });
 });
 
-testInDebug("A belongsTo relationship warns if malformatted data is pushed into the store", function(assert) {
-  assert.expectAssertion(() => {
-    run(() => {
-      let chapter = env.store.push({
-        data: {
-          type: 'chapter',
-          id: 1,
-          relationships: {
-            book: {
-              data: { id: 1, name: 'The Gallic Wars' }
-            }
-          }
-        }
+testInDebug(
+  'A belongsTo relationship warns if malformatted data is pushed into the store',
+  function(assert) {
+    assert.expectAssertion(() => {
+      run(() => {
+        let chapter = env.store.push({
+          data: {
+            type: 'chapter',
+            id: 1,
+            relationships: {
+              book: {
+                data: { id: 1, name: 'The Gallic Wars' },
+              },
+            },
+          },
+        });
+        chapter.get('book');
       });
-      chapter.get('book');
-    });
-  }, /expected the data for the book relationship on a <chapter:1> to be in a JSON API format/);
-});
+    }, /Encountered a relationship identifier without a type for the belongsTo relationship 'book' on <chapter:1>, expected a json-api identifier with type 'book'/);
+  }
+);
 
 test("belongsTo relationship with links doesn't trigger extra change notifications - #4942", function(assert) {
   Chapter.reopen({
-    book: DS.belongsTo({ async: true })
+    book: DS.belongsTo({ async: true }),
   });
 
   run(() => {
@@ -1461,11 +1704,11 @@ test("belongsTo relationship with links doesn't trigger extra change notificatio
         relationships: {
           book: {
             data: { type: 'book', id: '1' },
-            links: { related: '/chapter/1/book' }
-          }
-        }
+            links: { related: '/chapter/1/book' },
+          },
+        },
       },
-      included: [{ type: 'book', id: '1' }]
+      included: [{ type: 'book', id: '1' }],
     });
   });
 

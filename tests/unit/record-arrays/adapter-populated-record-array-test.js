@@ -2,9 +2,8 @@ import { A } from '@ember/array';
 import RSVP from 'rsvp';
 import { run } from '@ember/runloop';
 import DS from 'ember-data';
-
 import { module, test } from 'qunit';
-const { AdapterPopulatedRecordArray } = DS;
+const { AdapterPopulatedRecordArray, RecordArrayManager } = DS;
 
 module('unit/record-arrays/adapter-populated-record-array - DS.AdapterPopulatedRecordArray');
 
@@ -15,10 +14,10 @@ function internalModelFor(record) {
     },
     getRecord() {
       return record;
-    }
+    },
   };
 
-  record._internalModel = _internalModel
+  record._internalModel = _internalModel;
   return _internalModel;
 }
 
@@ -43,7 +42,7 @@ test('custom initial state', function(assert) {
     content,
     store,
     query: 'some-query',
-    links: 'foo'
+    links: 'foo',
   });
   assert.equal(recordArray.get('isLoaded'), true);
   assert.equal(recordArray.get('isUpdating'), false);
@@ -57,9 +56,13 @@ test('custom initial state', function(assert) {
 test('#replace() throws error', function(assert) {
   let recordArray = AdapterPopulatedRecordArray.create({ modelName: 'recordType' });
 
-  assert.throws(() => {
-    recordArray.replace();
-  }, Error('The result of a server query (on recordType) is immutable.'), 'throws error');
+  assert.throws(
+    () => {
+      recordArray.replace();
+    },
+    Error('The result of a server query (on recordType) is immutable.'),
+    'throws error'
+  );
 });
 
 test('#update uses _update enabling query specific behavior', function(assert) {
@@ -74,13 +77,13 @@ test('#update uses _update enabling query specific behavior', function(assert) {
       assert.equal(array, recordArray);
 
       return deferred.promise;
-    }
+    },
   };
 
   let recordArray = AdapterPopulatedRecordArray.create({
     modelName: 'recordType',
     store,
-    query: 'some-query'
+    query: 'some-query',
   });
 
   assert.equal(recordArray.get('isUpdating'), false, 'should not yet be updating');
@@ -110,7 +113,8 @@ test('#_setInternalModels', function(assert) {
   }
 
   let recordArray = AdapterPopulatedRecordArray.create({
-    query: 'some-query'
+    query: 'some-query',
+    manager: new RecordArrayManager({}),
   });
 
   let model1 = internalModelFor({ id: 1 });
@@ -130,17 +134,22 @@ test('#_setInternalModels', function(assert) {
   let meta = { bar: 2 };
 
   run(() => {
-    assert.equal(recordArray._setInternalModels([model1, model2], {
-      links,
-      meta
-    }), undefined, '_setInternalModels should have no return value');
+    assert.equal(
+      recordArray._setInternalModels([model1, model2], {
+        links,
+        meta,
+      }),
+      undefined,
+      '_setInternalModels should have no return value'
+    );
 
     assert.equal(didAddRecord, 2, 'two records should have been added');
 
-    assert.deepEqual(recordArray.toArray(), [
-      model1,
-      model2
-    ].map(x => x.getRecord()), 'should now contain the loaded records');
+    assert.deepEqual(
+      recordArray.toArray(),
+      [model1, model2].map(x => x.getRecord()),
+      'should now contain the loaded records'
+    );
 
     assert.equal(didLoad, 0, 'didLoad event should not have fired');
     assert.equal(recordArray.get('links').foo, 1);
@@ -166,20 +175,18 @@ test('change events when receiving a new query payload', function(assert) {
   }
 
   let recordArray = AdapterPopulatedRecordArray.create({
-    query: 'some-query'
+    query: 'some-query',
+    manager: new RecordArrayManager({}),
   });
 
   let model1 = internalModelFor({ id: '1', name: 'Scumbag Dale' });
-  let model2 = internalModelFor({ id: '2', name: 'Scumbag Katz' })
+  let model2 = internalModelFor({ id: '2', name: 'Scumbag Katz' });
 
   model1._recordArrays = { add, delete: del };
   model2._recordArrays = { add, delete: del };
 
   run(() => {
-    recordArray._setInternalModels([
-      model1,
-      model2
-    ], {});
+    recordArray._setInternalModels([model1, model2], {});
   });
 
   assert.equal(didAddRecord, 2, 'expected 2 didAddRecords');
@@ -197,9 +204,9 @@ test('change events when receiving a new query payload', function(assert) {
 
     // first time invoked
     assert.equal(array, recordArray, 'should be same record array as above');
-    assert.equal(startIdx,  0, 'expected startIdx');
+    assert.equal(startIdx, 0, 'expected startIdx');
     assert.equal(removeAmt, 2, 'expcted removeAmt');
-    assert.equal(addAmt,    2, 'expected addAmt');
+    assert.equal(addAmt, 2, 'expected addAmt');
   });
 
   assert.equal(recordArray.get('isLoaded'), true, 'should be considered loaded');
@@ -220,10 +227,7 @@ test('change events when receiving a new query payload', function(assert) {
 
   run(() => {
     // re-query
-    recordArray._setInternalModels([
-      model3,
-      model4
-    ], {});
+    recordArray._setInternalModels([model3, model4], {});
   });
 
   assert.equal(didAddRecord, 2, 'expected 2 didAddRecords');
@@ -244,9 +248,9 @@ test('change events when receiving a new query payload', function(assert) {
 
     // first time invoked
     assert.equal(array, recordArray, 'should be same recordArray as above');
-    assert.equal(startIdx,  0, 'expected startIdx');
+    assert.equal(startIdx, 0, 'expected startIdx');
     assert.equal(removeAmt, 2, 'expcted removeAmt');
-    assert.equal(addAmt,    1, 'expected addAmt');
+    assert.equal(addAmt, 1, 'expected addAmt');
   });
 
   // re-query
@@ -256,14 +260,12 @@ test('change events when receiving a new query payload', function(assert) {
   assert.equal(arrayDidChange, 0, 'record array should not yet have omitted a change event');
   assert.equal(contentDidChange, 0, 'recordArray.content should not have changed');
 
-  let model5 = internalModelFor({ id: '3', name: 'Scumbag Penner' })
+  let model5 = internalModelFor({ id: '3', name: 'Scumbag Penner' });
 
   model5._recordArrays = { add, delete: del };
 
   run(() => {
-    recordArray._setInternalModels([
-      model5
-    ], {});
+    recordArray._setInternalModels([model5], {});
   });
 
   assert.equal(didAddRecord, 1, 'expected 0 didAddRecord');

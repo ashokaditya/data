@@ -3,7 +3,7 @@ language: node_js
 sudo: false
 dist: trusty
 node_js:
-  - "4"
+  - "6"
 
 addons:
   chrome: stable
@@ -35,6 +35,7 @@ jobs:
       env: NAME=test                  # used only to make Travis UI show description
       script:
         - ./bin/lint-features
+        - yarn lint:js
         - yarn test
 
     - stage: additional tests

@@ -8,40 +8,39 @@ import DS from 'ember-data';
 
 const { attr, hasMany, belongsTo } = DS;
 
-let env, store, serializer, Elder, MiddleAger, Kid;
+let env, store, Elder, MiddleAger, Kid;
 
 module('integration/relationships/nested_relationships_test - Nested relationships', {
   beforeEach() {
     Elder = DS.Model.extend({
       name: attr('string'),
-      middleAgers: hasMany('middle-ager')
+      middleAgers: hasMany('middle-ager'),
     });
 
     MiddleAger = DS.Model.extend({
       name: attr('string'),
       elder: belongsTo('elder'),
-      kids: hasMany('kid')
+      kids: hasMany('kid'),
     });
 
     Kid = DS.Model.extend({
       name: attr('string'),
-      middleAger: belongsTo('middle-ager')
+      middleAger: belongsTo('middle-ager'),
     });
 
     env = setupStore({
       elder: Elder,
       'middle-ager': MiddleAger,
       kid: Kid,
-      adapter: DS.JSONAPIAdapter
+      adapter: DS.JSONAPIAdapter,
     });
 
     store = env.store;
-    serializer = env.serializer;
   },
 
   afterEach() {
     run(env.container, 'destroy');
-  }
+  },
 });
 
 /*
@@ -49,86 +48,93 @@ module('integration/relationships/nested_relationships_test - Nested relationshi
 */
 
 test('Sideloaded nested relationships load correctly', function(assert) {
+  env.adapter.shouldBackgroundReloadRecord = () => {
+    return false;
+  };
   run(() => {
-    serializer.pushPayload(store, {
-      data: [
-        {
-          id: '1',
-          type: 'kids',
-          links: {
-            self: '/kids/1'
+    store.push({
+      data: {
+        id: '1',
+        type: 'kid',
+        links: {
+          self: '/kids/1',
+        },
+        attributes: {
+          name: 'Kid 1',
+        },
+        relationships: {
+          middleAger: {
+            links: {
+              self: '/kids/1/relationships/middle-ager',
+              related: '/kids/1/middle-ager',
+            },
+            data: {
+              type: 'middle-ager',
+              id: '1',
+            },
           },
-          attributes: {
-            name: 'Kid 1'
-          },
-          relationships: {
-            'middle-ager': {
-              links: {
-                self: '/kids/1/relationships/middle-ager',
-                related: '/kids/1/middle-ager'
-              },
-              data:{
-                type: 'middle-agers',
-                id: '1'
-              }
-            }
-          }
-        }
-      ],
+        },
+      },
       included: [
         {
           id: '1',
-          type: 'middle-agers',
+          type: 'middle-ager',
           links: {
-            self: '/middle-ager/1'
+            self: '/middle-ager/1',
           },
           attributes: {
-            name: 'Middle Ager 1'
+            name: 'Middle Ager 1',
           },
           relationships: {
             elder: {
               links: {
                 self: '/middle-agers/1/relationships/elder',
-                related: '/middle-agers/1/elder'
+                related: '/middle-agers/1/elder',
               },
               data: {
-                type: 'elders',
-                id: '1'
-              }
+                type: 'elder',
+                id: '1',
+              },
             },
             kids: {
               links: {
                 self: '/middle-agers/1/relationships/kids',
-                related: '/middle-agers/1/kids'
-              }
-            }
-          }
+                related: '/middle-agers/1/kids',
+              },
+              data: [
+                {
+                  type: 'kid',
+                  id: '1',
+                },
+              ],
+            },
+          },
         },
 
         {
           id: '1',
-          type: 'elders',
+          type: 'elder',
           links: {
-            self: '/elders/1'
+            self: '/elders/1',
           },
           attributes: {
-            name: 'Elder 1'
+            name: 'Elder 1',
           },
           relationships: {
-            'middle-agers': {
+            middleAger: {
               links: {
                 self: '/elders/1/relationships/middle-agers',
-                related: '/elders/1/middle-agers'
-              }
-            }
-          }
-        }
-      ]
+                related: '/elders/1/middle-agers',
+              },
+            },
+          },
+        },
+      ],
     });
   });
 
   return run(() => {
-    let kid = store.peekRecord('kid', 1);
+    let kid = store.peekRecord('kid', '1');
 
     return kid.get('middleAger').then(middleAger => {
       assert.ok(middleAger, 'MiddleAger relationship was set up correctly');
@@ -145,4 +151,3 @@ test('Sideloaded nested relationships load correctly', function(assert) {
     });
   });
 });
-
